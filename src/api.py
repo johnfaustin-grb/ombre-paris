@@ -1,67 +1,60 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Tuple
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, timezone, timedelta
+import logging
 
-# --- Pydantic Models for Request and Response ---
-
-class RouteRequest(BaseModel):
-    start_point: Tuple[float, float]  # (latitude, longitude)
-    end_point: Tuple[float, float]    # (latitude, longitude)
-
-class RouteResponse(BaseModel):
-    path: List[Tuple[float, float]] # A list of (lat, lon) points
-
-# --- FastAPI Application ---
-
-app = FastAPI(
-    title="Shady Route API",
-    description="API for finding the shadiest walking/cycling route in Paris.",
-    version="0.1.0 (Proof of Concept)"
+# --- Logging Setup ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("api.log"),
+        logging.StreamHandler() # Also print to console
+    ]
 )
 
-# --- CORS Middleware ---
-# This allows the frontend (running on a different port) to make requests to this API.
-origins = [
-    "http://localhost",
-    "http://localhost:8080", # The origin for our simple frontend server
-]
+# Use relative import to import from within the same package
+from .main import find_shady_path
 
+# --- Pydantic Models ---
+class RouteRequest(BaseModel):
+    start_point: Tuple[float, float]
+    end_point: Tuple[float, float]
+
+class RouteResponse(BaseModel):
+    path: List[Tuple[float, float]]
+
+# --- FastAPI Application ---
+app = FastAPI(title="Shady Route API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
 @app.get("/")
 def read_root():
-    """A simple root endpoint to check if the API is running."""
     return {"message": "Welcome to the Shady Route API!"}
 
 @app.post("/api/route", response_model=RouteResponse)
 def get_shady_route(request: RouteRequest):
-    """
-    Calculates the shadiest route between two points.
+    logging.info(f"Received REAL route request from {request.start_point} to {request.end_point}")
 
-    **For this Proof of Concept, it returns a hardcoded dummy route.**
-    """
-    print(f"Received route request from {request.start_point} to {request.end_point}")
+    paris_tz = timezone(timedelta(hours=2))
+    calculation_time = datetime(2025, 8, 25, 14, 0, 0, tzinfo=paris_tz)
 
-    # In the future, this will call the main() function from main.py
-    # and return the real calculated path.
+    try:
+        path_coords = find_shady_path(request.start_point, request.end_point, calculation_time)
 
-    # For now, return a dummy path that looks like a plausible route.
-    dummy_path = [
-        request.start_point,
-        (48.858, 2.350), # A point in the middle
-        (48.860, 2.345), # Another point
-        request.end_point
-    ]
+        if path_coords is None:
+            logging.warning("No path could be found between the specified points.")
+            raise HTTPException(status_code=404, detail="Could not find a path.")
 
-    return {"path": dummy_path}
-
-# To run this API, use the command:
-# python3 -m uvicorn src.api:app --reload
+        logging.info(f"Successfully found a path with {len(path_coords)} points.")
+        return {"path": path_coords}
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during route calculation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An internal error occurred.")
