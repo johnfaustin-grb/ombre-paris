@@ -1,0 +1,5 @@
+geopandas
+osmium
+suncalc
+numpy
+networkx
