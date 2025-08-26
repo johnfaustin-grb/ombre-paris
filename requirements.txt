@@ -5,3 +5,4 @@ numpy
 networkx
 fastapi
 uvicorn[standard]
+pyarrow

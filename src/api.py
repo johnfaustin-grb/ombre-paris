@@ -1,9 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Tuple
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from datetime import datetime, timezone, timedelta
 import logging
+from contextlib import asynccontextmanager
+
+# Use relative import to import from within the same package
+from .main import find_shady_path, load_graph
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -11,14 +15,30 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("api.log"),
-        logging.StreamHandler() # Also print to console
+        logging.StreamHandler()
     ]
 )
 
-# Use relative import to import from within the same package
-from .main import find_shady_path
+# --- Lifespan Event Handler ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This code runs on startup
+    logging.info("API Startup: Loading street graph into memory...")
+    success = load_graph()
+    if not success:
+        logging.error("CRITICAL: Could not load street graph. The API will not be able to find routes.")
+    yield
+    # This code runs on shutdown (if any cleanup were needed)
+    logging.info("API Shutdown.")
 
-# --- Pydantic Models ---
+# --- FastAPI Application ---
+app = FastAPI(
+    title="Shady Route API",
+    version="1.2.0 (Pre-processed Data)",
+    lifespan=lifespan
+)
+
+# --- API Models ---
 class RouteRequest(BaseModel):
     start_point: Tuple[float, float]
     end_point: Tuple[float, float]
@@ -26,35 +46,22 @@ class RouteRequest(BaseModel):
 class RouteResponse(BaseModel):
     path: List[Tuple[float, float]]
 
-# --- FastAPI Application ---
-app = FastAPI(title="Shady Route API", version="1.0.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the Shady Route API!"}
-
+# --- API Routes ---
 @app.post("/api/route", response_model=RouteResponse)
 def get_shady_route(request: RouteRequest):
-    logging.info(f"Received REAL route request from {request.start_point} to {request.end_point}")
+    logging.info(f"Received route request from {request.start_point} to {request.end_point}")
 
     paris_tz = timezone(timedelta(hours=2))
     calculation_time = datetime(2025, 8, 25, 14, 0, 0, tzinfo=paris_tz)
 
     try:
         path_coords = find_shady_path(request.start_point, request.end_point, calculation_time)
-
         if path_coords is None:
-            logging.warning("No path could be found between the specified points.")
             raise HTTPException(status_code=404, detail="Could not find a path.")
-
-        logging.info(f"Successfully found a path with {len(path_coords)} points.")
         return {"path": path_coords}
     except Exception as e:
-        logging.error(f"An unexpected error occurred during route calculation: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An internal error occurred.")
+        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
+
+# --- Static Files (Frontend) ---
+app.mount("/", StaticFiles(directory="frontend", html=True), name="static")
