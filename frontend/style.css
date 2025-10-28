@@ -1,0 +1,11 @@
+body {
+    font-family: sans-serif;
+    margin: 20px;
+}
+
+#map {
+    height: 600px;
+    width: 100%;
+    border: 1px solid #ccc;
+    margin-top: 20px;
+}

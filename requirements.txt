@@ -1,0 +1,8 @@
+geopandas
+osmium
+suncalc
+numpy
+networkx
+fastapi
+uvicorn[standard]
+pyarrow
